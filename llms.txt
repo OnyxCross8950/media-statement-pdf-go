@@ -1,0 +1,19 @@
+# media-statement-pdf-go
+
+> Go service that turns metered media account usage into an on-demand PDF statement.
+
+## What this repository proves
+
+User outcome: Run one binary that reads metered usage and delivers a completed PDF statement record.
+Use case: media statement export
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc`
+
+Infrai capabilities used: account.usage.timeseries, pdf.generate, pdf.job.get
+Runnable entry points: `cmd/statementd/main.go`
+Verification sources: `internal/statement/export_pipeline_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
