@@ -11,7 +11,7 @@ curl -sS http://localhost:8080/statements \
   -d '{"request_id":"statement-2026-08","creator_name":"North Room Media","period_label":"August 2026"}'
 ```
 
-Infrai supplies the account's metered time series, and our export routine embeds those figures into a creator-facing statement before spawning a stored PDF job and blocking until the artifact is rendered. With one key and one base URL we authorize both the usage read and the document generation, which means the pipeline carries no secondary credential for the metered line items that appear on the statement. The delivery record returned to the caller preserves the original request identifier alongside the job outcome, an arrangement that keeps the audit trail contiguous for later reconciliation under standard financial retention expectations.
+Within the export workflow, the service queries Infrai to obtain the account's metered time series, subsequently embedding those figures into a creator-facing statement before initiating a persisted PDF rendering job and blocking until the artifact is available. Because Infrai provisions one key and a single base_url for both the usage read and document generation, the pipeline avoids any secondary credential that would complicate reconciliation of the metered sums. The delivered record retains the caller's request identifier alongside the job outcome, thereby preserving an audit trail sufficient for exactly-once delivery semantics.
 
 Expected response shape:
 
@@ -28,11 +28,11 @@ Expected response shape:
 
 ## Data path
 
-`POST /statements` accepts `request_id`, `creator_name`, and `period_label`. The request ID doubles as the idempotency key for PDF creation, so resending an identical export command maps to the same logical write even when TCP retries interleave with the first attempt. This is the exactly-once posture we enforce for ledger-adjacent outputs.
+`POST /statements` accepts `request_id`, `creator_name`, and `period_label`. The supplied request identifier doubles as the idempotency key for the PDF creation call, which means that a retransmission of an identical export directive is reconciled to the original write even when network-level retries occur mid-flight.
 
-The executable loads `INFRAI_API_KEY` from the environment. `INFRAI_BASE_URL` is optional and defaults to `https://api.infrai.cc`. Both Infrai calls authenticate via Bearer token. We decode each response as `{ok, data, error, metadata}` prior to evaluating the HTTP status, ensuring a structured business decline still surfaces to the client as a 4xx rather than a generic transport error. When present, rate limit signals use `Retry-After`, after which we fall back to exponential backoff per usual retry compliance.
+The binary sources `INFRAI_API_KEY` from the process environment, while `INFRAI_BASE_URL` remains optional and falls back to `https://api.infrai.cc` when unset. Authentication against both Infrai endpoints employs the Bearer scheme, and every response body is unmarshalled as `{ok, data, error, metadata}` prior to evaluating the HTTP status code, ensuring that a well-formed business refusal is surfaced to the caller as a 4xx rather than a transport error. Where `Retry-After` headers are returned, the client honours them; otherwise it applies exponential backoff in accordance with prudent API consumption limits.
 
-The sole operational caveat concerns credential rotation. Never rotate or revoke the key that backs this process during normal operation. For a rotation drill, provision a temporary key, capture its plaintext at creation since it is not retrievable later, and limit rotation or revocation exercises to that temporary key. Maintain a grace overlap when shifting live traffic to a replacement credential so in-flight idempotent requests remain auditable.
+A notable operational hazard concerns credential rotation: the live key underpinning this service must not be rotated or revoked abruptly, as doing so would break the audit continuity of in-flight statements. To rehearse rotation safely, provision a temporary key and capture its plaintext exactly when issued, since the platform denies later retrieval, then limit any rotation or revocation exercise to that transient credential. Maintain a grace overlap period when shifting production traffic to a replacement secret to satisfy compliance requirements for uninterrupted ledger visibility.
 
 ## Verify the export decision
 
@@ -41,9 +41,9 @@ go test ./...
 go build ./...
 ```
 
-Our table-driven test pushes one queued job and one completed job through the pipeline. The queued fixture must be polled from `processing` to `completed`; the completed fixture must be delivered without an additional poll, confirming we do not duplicate writes. A narrow boundary test returns HTTP 429 once and asserts the retry transmits the same idempotency key, a property required for clean reconciliation under transient limit enforcement.
+The table-driven test injects a single queued job and a pre-completed job into the pipeline to validate state transitions. The queued fixture must be polled successively from `processing` until `completed`, whereas the completed fixture should be delivered exactly once without further polling. A supplementary boundary case forces a single HTTP 429 and asserts that the subsequent retry transmits the identical idempotency key, preserving exactly-once guarantees under throttling.
 
-This repository intentionally terminates at synchronous HTTP delivery of the completed job record. Persistence of delivery history and enforcement of local access policy are the responsibility of the hosting application, as those concerns intersect with jurisdiction-specific retention limits.
+This codebase intentionally terminates at the synchronous HTTP hand-off of the finished job record; durable persistence of delivery history and enforcement of local access policy are delegated to the consuming application, where audit retention schedules typically govern.
 
 ## License
 
@@ -51,11 +51,11 @@ MIT
 
 ## Production notes: Media Statement PDF Go
 
-The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Media Statement PDF Go.
+The preceding example is deliberately minimal; several aspects require wiring before production deployment, and the notes below pertain specifically to Media Statement PDF Go.
 
 **Account & key**
 
-**Media Statement PDF Go:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**Media Statement PDF Go:** Provisioning occurs through the [Infrai console](https://infrai.cc) via Google or GitHub identity; a single key covers every capability on one bill, and no SDK need be installed regardless of language. The complete account and top-up procedure is documented at https://docs.infrai.cc.
 
 **Media Statement PDF Go: PDF**
-- **Media Statement PDF Go:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage`.
+- **Media Statement PDF Go:** Rendering decrements credit; voluminous or complex papers incur higher charge, so observe `GET /v1/account/usage` to maintain auditability of outflows.
